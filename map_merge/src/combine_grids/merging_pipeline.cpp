@@ -44,6 +44,8 @@
 #include <opencv2/stitching/detail/motion_estimators.hpp>
 
 #include "estimation_internal.h"
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 namespace combine_grids
 {
@@ -60,10 +62,13 @@ bool MergingPipeline::estimateTransforms(FeatureType feature_type,
       cv::makePtr<cv::detail::AffineBestOf2NearestMatcher>();
   cv::Ptr<cv::detail::Estimator> estimator =
       cv::makePtr<cv::detail::AffineBasedEstimator>();
+//  cv::Ptr<cv::detail::Estimator> estimator =
+//        cv::makePtr<cv::detail::Estimator>();
   cv::Ptr<cv::detail::BundleAdjusterBase> adjuster =
       cv::makePtr<cv::detail::BundleAdjusterAffinePartial>();
 
   if (images_.empty()) {
+    ROS_DEBUG("images_ empty");
     return true;
   }
 
@@ -72,6 +77,8 @@ bool MergingPipeline::estimateTransforms(FeatureType feature_type,
   image_features.reserve(images_.size());
   for (const cv::Mat& image : images_) {
     image_features.emplace_back();
+//    cv::Mat image_denoised;
+//    cv::fastNlMeansDenoising(image, image_denoised, 3, 7, 21);
     if (!image.empty()) {
 #if CV_VERSION_MAJOR >= 4
       cv::detail::computeImageFeatures(finder, image, image_features.back());
@@ -100,6 +107,7 @@ bool MergingPipeline::estimateTransforms(FeatureType feature_type,
   // avoid setting empty grid as reference frame, in case some maps never
   // arrive. If all is empty just set null transforms.
   if (good_indices.size() == 1) {
+    ROS_DEBUG("Good indices is size 1.");
     transforms_.clear();
     transforms_.resize(images_.size());
     for (size_t i = 0; i < images_.size(); ++i) {
@@ -126,19 +134,21 @@ bool MergingPipeline::estimateTransforms(FeatureType feature_type,
   }
   ROS_DEBUG("optimizing global transforms");
   adjuster->setConfThresh(confidence);
-  if (!(*adjuster)(image_features, pairwise_matches, transforms)) {
-    ROS_WARN("Bundle adjusting failed. Could not estimate transforms.");
-    return false;
-  }
+//  if (!(*adjuster)(image_features, pairwise_matches, transforms)) {
+//    ROS_WARN("Bundle adjusting failed. Could not estimate transforms.");
+//    return false;
+//  }
 
   transforms_.clear();
   transforms_.resize(images_.size());
   size_t i = 0;
+  ROS_DEBUG("Adding transforms into transforms_");
   for (auto& j : good_indices) {
     // we want to work with transforms as doubles
     transforms[i].R.convertTo(transforms_[static_cast<size_t>(j)], CV_64F);
     ++i;
   }
+  ROS_DEBUG("Finished adding transforms into transforms_");
 
   return true;
 }
@@ -171,10 +181,12 @@ nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
 
   for (size_t i = 0; i < images_.size(); ++i) {
     if (!transforms_[i].empty() && !images_[i].empty()) {
+      ROS_DEBUG("Translation of transform %zd is %f, %f",i,transforms_[i].at<double>(0,2),transforms_[i].at<double>(1,2));
       imgs_warped.emplace_back();
       rois.emplace_back(
           warper.warp(images_[i], transforms_[i], imgs_warped.back()));
     }
+    else ROS_DEBUG("Transform %zd is empty.",i);
   }
 
   if (imgs_warped.empty()) {
@@ -184,7 +196,19 @@ nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
   ROS_DEBUG("compositing result grid");
   nav_msgs::OccupancyGrid::Ptr result;
   internal::GridCompositor compositor;
+  std::vector<cv::Point> corners;
+  corners.reserve(images_.size());
+  std::vector<cv::Size> sizes;
+  sizes.reserve(images_.size());
   result = compositor.compose(imgs_warped, rois);
+  roi_info_.clear();
+  for (auto& roi : rois) {
+	  roi_info_.push_back(roi);
+	  corners.push_back(roi.tl());
+	  sizes.push_back(roi.size());
+    ROS_DEBUG("Complete corner %d, %d width %d and height %d",roi.tl().x, roi.tl().y,roi.size().width,roi.size().height);
+  }
+  complete_roi_ = cv::detail::resultRoi(corners, sizes);
 
   // set correct resolution to output grid. use resolution of identity (works
   // for estimated trasforms), or any resolution (works for know_init_positions)
@@ -193,6 +217,9 @@ nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
   for (size_t i = 0; i < transforms_.size(); ++i) {
     // check if this transform is the reference frame
     if (isIdentity(transforms_[i])) {
+      result->info.origin.position.x = grids_[i]->info.origin.position.x;
+      result->info.origin.position.y = grids_[i]->info.origin.position.y;
+      result->info.origin.orientation.w = grids_[i]->info.origin.orientation.w;
       result->info.resolution = grids_[i]->info.resolution;
       break;
     }
@@ -204,12 +231,9 @@ nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
     result->info.resolution = any_resolution;
   }
 
-  // set grid origin to its centre
-  result->info.origin.position.x =
-      -(result->info.width / 2.0) * double(result->info.resolution);
-  result->info.origin.position.y =
-      -(result->info.height / 2.0) * double(result->info.resolution);
-  result->info.origin.orientation.w = 1.0;
+  // set grid origin to its centre - Facilitates transforms
+  result_map_width = (float)result->info.width * result->info.resolution; // in meters
+  result_map_height = (float)result->info.height * result->info.resolution; // in meters
 
   return result;
 }
@@ -221,7 +245,9 @@ std::vector<geometry_msgs::Transform> MergingPipeline::getTransforms() const
 
   for (auto& transform : transforms_) {
     if (transform.empty()) {
-      result.emplace_back();
+      geometry_msgs::Transform empty_transform;
+      empty_transform.rotation.w = 1;
+      result.emplace_back(empty_transform);
       continue;
     }
 
@@ -234,11 +260,15 @@ std::vector<geometry_msgs::Transform> MergingPipeline::getTransforms() const
     // our rotation is in fact only 2D, thus quaternion can be simplified
     double a = transform.at<double>(0, 0);
     double b = transform.at<double>(1, 0);
-    ros_transform.rotation.w = std::sqrt(2. + 2. * a) * 0.5;
-    ros_transform.rotation.x = 0.;
-    ros_transform.rotation.y = 0.;
-    ros_transform.rotation.z = std::copysign(std::sqrt(2. - 2. * a) * 0.5, b);
-
+    if (std::abs(a) > 1){
+			a = std::copysign(1, a);
+		}
+		double alpha = std::acos(a);
+		// our rotation is in fact only 2D, thus quaternion can be simplified
+		ros_transform.rotation.w = std::cos(alpha * 0.5); //std::sqrt(2. + 2. * a) * 0.5;
+		ros_transform.rotation.x = 0.;
+		ros_transform.rotation.y = 0.;
+		ros_transform.rotation.z = std::sin(alpha * 0.5); //std::copysign(std::sqrt(2. - 2. * a) * 0.5, b);
     result.push_back(ros_transform);
   }
 
