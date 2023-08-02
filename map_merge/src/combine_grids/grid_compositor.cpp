@@ -58,6 +58,7 @@ nav_msgs::OccupancyGrid::Ptr GridCompositor::compose(
   for (auto& roi : rois) {
     corners.push_back(roi.tl());
     sizes.push_back(roi.size());
+    ROS_DEBUG("Corner %d, %d width %d and height %d",roi.tl().x, roi.tl().y,roi.size().width,roi.size().height);
   }
   cv::Rect dst_roi = cv::detail::resultRoi(corners, sizes);
 
