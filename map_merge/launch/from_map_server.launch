@@ -7,9 +7,23 @@ https://github.com/hrnr/m-explore-extra
 roslaunch multirobot_map_merge from_map_server.launch map1:=PATH_TO_m-explore-extra/map_merge/gmapping_maps/2011-08-09-12-22-52.yaml map2:=PATH_TO_m-explore-extra/map_merge/gmapping_maps/2012-01-28-11-12-01.yaml rviz:=true
 -->
 <launch>
-  <arg name="map1" default="map1.yaml"/>
-  <arg name="map2" default="map2.yaml"/>
-  <arg name="rviz" default="false"/>
+  <arg name="map1" default="$(find coop_robot)/data/tb3_0_map.yaml" />
+  <arg name="map2" default="$(find coop_robot)/data/tb3_1_map.yaml" />
+  <arg name="rviz" default="true" />
+
+  <group ns="robot1/map_merge">
+    <param name="init_pose_x" value="-7" />
+    <param name="init_pose_y" value="-1" />
+    <param name="init_pose_z" value="0" />
+    <param name="init_pose_yaw" value="0" />
+  </group>
+
+  <group ns="robot2/map_merge">
+    <param name="init_pose_x" value="7" />
+    <param name="init_pose_y" value="-1" />
+    <param name="init_pose_z" value="0" />
+    <param name="init_pose_yaw" value="0" />
+  </group>
 
   <include file="$(find multirobot_map_merge)/launch/map_merge.launch"/>
 
@@ -25,4 +39,7 @@ roslaunch multirobot_map_merge from_map_server.launch map1:=PATH_TO_m-explore-ex
   </node>
 
   <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" args="-d $(find multirobot_map_merge)/launch/map_merge.rviz"/>
+
+  <node pkg="tf" type="static_transform_publisher" name="world_to_new_1_map" args="0 0 0 0 0 0 /world /robot1 100"/>
+  <node pkg="tf" type="static_transform_publisher" name="world_to_new_2_map" args="0 0 0 0 0 0 /world /robot2 100"/>
 </launch>
