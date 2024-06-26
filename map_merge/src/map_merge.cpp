@@ -229,7 +229,7 @@ void MapMerge::fullMapUpdate(const nav_msgs::OccupancyGrid::ConstPtr& msg,
 
   subscription.map_frame = msg->header.frame_id;
   float origin_x = msg->info.origin.position.x;
-  float origin_y = msg->info.origin.position.x;
+  float origin_y = msg->info.origin.position.y;
   ROS_DEBUG("Origin of updated grid %f, %f",origin_x,origin_y);
   subscription.readonly_map = msg;
   subscription.writable_map = nullptr;
