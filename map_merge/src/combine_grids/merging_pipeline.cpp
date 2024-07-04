@@ -235,9 +235,6 @@ nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
   result_map_width = (float)result->info.width * result->info.resolution; // in meters
   result_map_height = (float)result->info.height * result->info.resolution; // in meters
 
-  result->info.origin.position.x = -result_map_width / 2;
-  result->info.origin.position.y = -result_map_height / 2;
-
   return result;
 }
 
